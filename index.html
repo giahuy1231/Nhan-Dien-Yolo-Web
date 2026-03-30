@@ -59,64 +59,68 @@
         const status = document.getElementById('status');
         let model;
 
-        // 1. Khởi tạo Camera
         async function setupCamera() {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'environment', width: 640, height: 640 },
-                audio: false
-            });
-            video.srcObject = stream;
-            return new Promise(resolve => video.onloadedmetadata = () => resolve());
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment', width: 640, height: 640 },
+            audio: false
+        });
+        video.srcObject = stream;
+        return new Promise(resolve => video.onloadedmetadata = () => resolve());
         }
 
-        // 2. Chạy nhận diện
         async function predict() {
-            // Giải phóng bộ nhớ mỗi vòng lặp
+            // Sử dụng tf.engine().startScope() để tránh tràn RAM iPhone 8 Plus
             tf.engine().startScope();
 
-            // Thay đổi: Sử dụng tf.tidy để dọn dẹp bộ nhớ tốt hơn cho iPhone 8 Plus
-            const img = tf.tidy(() => {
-                return tf.browser.fromPixels(video)
-                    .resizeBilinear([640, 640]) // Dùng Bilinear thay vì Nearest để ảnh mượt hơn
-                    .expandDims(0)
-                    .div(255.0);
-            });
-
             try {
-                // Thực hiện dự đoán
-                const result = await model.executeAsync(img); // Dùng executeAsync thay vì predict
-        
-                // Log thử kết quả ra màn hình điện thoại để kiểm tra
-                // status.innerText = "Đang nhận diện: " + result.shape; 
+                // 1. Tiền xử lý chuẩn cho YOLOv8
+                const img = tf.browser.fromPixels(video)
+                    .resizeBilinear([640, 640])
+                    .div(255.0)
+                    .expandDims(0);
 
-                // Giải phóng kết quả sau khi dùng
-                if (Array.isArray(result)) {
-                    result.forEach(t => t.dispose());
-                } else {
-                    result.dispose();
-                }
-            } catch (error) {
-                status.innerText = "Lỗi dự đoán: " + error.message;
+                // 2. Sử dụng .execute() thay vì .predict() để lấy tensor thô
+                const result = model.execute(img);
+                
+                // 3. Chuyển kết quả về dạng mảng để kiểm tra (Fix lỗi Shape)
+                const resData = result.dataSync();
+                
+                // LOG ĐỂ DEBUG: Nếu bạn mở Console trên Mac, bạn sẽ thấy con số thực tế
+                // console.log("Độ dài dữ liệu nhận được:", resData.length);
+
+                // Vẽ một khung giả lập để biết AI đang chạy
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.strokeStyle = "#00FF00";
+                ctx.lineWidth = 2;
+                ctx.strokeRect(20, 20, 50, 50); 
+                status.innerText = "AI đang quét... (Dữ liệu: " + resData.length + ")";
+
+            } catch (e) {
+                status.innerText = "Lỗi kỹ thuật: " + e.message;
             }
 
             tf.engine().endScope();
-            requestAnimationFrame(predict);
+            // Giới hạn tốc độ khung hình để iPhone 8 Plus không bị quá nhiệt
+            setTimeout(() => {
+                requestAnimationFrame(predict);
+            }, 100); 
         }
 
         async function main() {
             try {
-                // Tải mô hình từ thư mục cục bộ
+                // Nạp thư viện và mô hình
+                status.innerText = "Đang cấu hình AI...";
                 model = await tf.loadGraphModel('model.json');
-                status.innerText = "Mô hình đã sẵn sàng! Đang mở Camera...";
                 await setupCamera();
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
+                status.innerText = "Đang chạy nhận diện!";
                 predict();
             } catch (e) {
-                status.innerText = "Lỗi: " + e.message;
+                status.innerText = "Không thể nạp mô hình: " + e.message;
             }
         }
-
         main();
     </script>
 </body>
