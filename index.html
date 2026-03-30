@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Object Detection - iPhone 8 Plus</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <style>
+        body { font-family: sans-serif; margin: 0; background: #000; color: #fff; text-align: center; }
+        .video-container { position: relative; display: inline-block; width: 100%; max-width: 640px; }
+        video { width: 100%; height: auto; display: block; border-radius: 8px; }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        #status { padding: 10px; color: #00ff00; }
+    </style>
+</head>
+<body>
+    <h1>AI Real-time Detection</h1>
+    <div id="status">Đang tải mô hình AI...</div>
+    
+    <div class="video-container">
+        <video id="webcam" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('overlay');
+        const status = document.getElementById('status');
+        let model;
+
+        // 1. Khởi tạo Camera
+        async function setupCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment', width: 640, height: 640 },
+                audio: false
+            });
+            video.srcObject = stream;
+            return new Promise(resolve => video.onloadedmetadata = () => resolve());
+        }
+
+        // 2. Chạy nhận diện
+        async function predict() {
+            // Giải phóng bộ nhớ mỗi vòng lặp
+            tf.engine().startScope();
+
+            // Tiền xử lý: Chuyển ảnh camera thành Tensor [1, 640, 640, 3]
+            const img = tf.browser.fromPixels(video)
+                .resizeNearestNeighbor([640, 640])
+                .div(255.0)
+                .expandDims(0);
+
+            // Dự đoán
+            const result = await model.predict(img);
+            
+            // Xử lý vẽ kết quả lên Canvas (Simplified)
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Lưu ý: Kết quả YOLOv8 trả về mảng số liệu phức tạp
+            // Ở đồ án, bạn có thể log ra để kiểm tra trước:
+            // console.log(result.dataSync());
+
+            tf.engine().endScope();
+            requestAnimationFrame(predict);
+        }
+
+        async function main() {
+            try {
+                // Tải mô hình từ thư mục cục bộ
+                model = await tf.loadGraphModel('yolov8n_web_model/model.json');
+                status.innerText = "Mô hình đã sẵn sàng! Đang mở Camera...";
+                await setupCamera();
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                predict();
+            } catch (e) {
+                status.innerText = "Lỗi: " + e.message;
+            }
+        }
+
+        main();
+    </script>
+</body>
+</html>
