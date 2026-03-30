@@ -2,7 +2,8 @@
 <html>
 
 <head>
-    <title>Ứng Dụng Nhận Diện</title>
+    <title>Ứng Dụng Nhận Diện - Dành cho iPhone</title>
+    <!-- Tránh tải tfjs để tiết kiệm cực lớn RAM cho iPhone 8 Plus, chỉ sử dụng ort-web -->
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
     <style>
         body {
@@ -17,16 +18,20 @@
             width: 100%;
             max-width: 640px;
             border-radius: 10px;
+            display: block;
         }
 
         .container {
             position: relative;
             display: inline-block;
+            width: 100%;
+            max-width: 640px;
         }
 
         #status {
             padding: 15px;
             font-size: 14px;
+            color: #ffaa00;
         }
 
         .stats-container {
@@ -67,12 +72,29 @@
             left: 0;
             width: 100%;
             height: 100%;
+            pointer-events: none;
+        }
+
+        #start-btn {
+            background: #0f0;
+            color: #000;
+            border: none;
+            padding: 12px 30px;
+            font-size: 18px;
+            border-radius: 25px;
+            font-weight: bold;
+            margin: 20px 0;
+            cursor: pointer;
         }
     </style>
 </head>
 
 <body>
     <h1>AI Object Detection (ONNX)</h1>
+
+    <!-- iPhone Safari đôi khi yêu cầu phải bấm nút mới cho mở Camera -->
+    <button id="start-btn" onclick="startCamera()">Mở Camera & Chạy AI</button>
+
     <div class="stats-container">
         <h3>Thống kê vật thể</h3>
         <table id="stats-table">
@@ -87,7 +109,7 @@
         </table>
     </div>
 
-    <div id="status">Đang khởi tạo hệ thống...</div>
+    <div id="status">Vui lòng bấm nút để bắt đầu...</div>
 
     <div class="container">
         <video id="webcam" autoplay playsinline muted></video>
@@ -99,73 +121,106 @@
         const canvas = document.getElementById('overlay');
         const status = document.getElementById('status');
         const statsBody = document.getElementById('stats-body');
+        const startBtn = document.getElementById('start-btn');
+
         let session;
-        let labels = []; // Mảng chứa tên các vật thể
+        let labels = [];
+        let isRunning = false;
+
+        // Canvas phụ ẩn đi để Scale ảnh từ video về chuẩn 640x640 của YOLO bằng thuần JS (ko dùng TF.js để nhẹ máy)
+        const processCanvas = document.createElement('canvas');
+        processCanvas.width = 640;
+        processCanvas.height = 640;
+        const processCtx = processCanvas.getContext('2d', { willReadFrequently: true });
 
         // 1. Khởi tạo
-        async function main() {
+        async function startCamera() {
+            if (isRunning) return;
+            startBtn.style.display = 'none'; // Ẩn nút đi sau khi bấm
+            isRunning = true;
+
             try {
-                status.innerText = "Đang cấu hình AI (Tắt SIMD)...";
+                status.innerText = "Đang cấu hình AI (Tắt SIMD cho iPhone)...";
                 ort.env.wasm.simd = false; // Tắt SIMD cho iPhone 8 Plus
 
                 status.innerText = "Đang tải mô hình ONNX (~12MB)...";
                 session = await ort.InferenceSession.create('./best.onnx', { executionProviders: ['wasm'] });
 
-                // Lấy danh sách labels từ mô hình (YOLOv8 thường nhúng labels vào metadata)
-                // Nếu dùng coco8.yaml mặc định, hãy dùng mảng label cứng ở dưới
-                labels = ["person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch", "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush"];
+                labels = ["person", "bicycle", "car", "motorcycle", "airplane", "bus",
+                    "train", "truck", "boat", "traffic light", "fire hydrant", "stop sign",
+                    "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
+                    "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag",
+                    "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite",
+                    "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket",
+                    "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana",
+                    "apple", "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza",
+                    "donut", "cake", "chair", "couch", "potted plant", "bed", "dining table",
+                    "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone",
+                    "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock",
+                    "vase", "scissors", "teddy bear", "hair drier", "toothbrush"];
 
-                status.innerText = "Đang mở Camera...";
+                status.innerText = "Đang xin quyền mở Camera...";
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'environment', width: 640, height: 640 },
+                    // facingMode: 'environment' giúp sử dụng camera sau
+                    video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 640 } },
                     audio: false
                 });
                 video.srcObject = stream;
 
                 video.onloadedmetadata = () => {
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
+                    canvas.width = video.clientWidth;
+                    canvas.height = video.clientHeight;
                     status.innerText = "AI đang hoạt động!";
+                    status.style.color = "#00ff88";
                     predict();
                 };
             } catch (e) {
                 status.innerText = "Lỗi hệ thống: " + e.message;
+                status.style.color = "#f00";
+                startBtn.style.display = 'block';
+                isRunning = false;
             }
         }
 
         // 2. Chạy nhận diện và xử lý hậu kỳ (Post-processing)
         async function predict() {
+            if (video.readyState < 2) {
+                requestAnimationFrame(predict);
+                return;
+            }
+
             const inputWidth = 640;
             const inputHeight = 640;
 
-            // 2.1 Tiền xử lý: Chuyển ảnh camera thành tensor
-            const img = tf.browser.fromPixels(video)
-                .resizeBilinear([inputWidth, inputHeight])
-                .expandDims(0)
-                .div(255.0);
+            // 2.1 Tiền xử lý ảnh gốc: Chuyển ảnh camera thành tensor bằng JS Nguyên Thuỷ
+            // Phương pháp này nhanh và ít tốn RAM gấp 10 lần so với nạp thư viện tf.js trên hệ điều hành cũ
+            processCtx.drawImage(video, 0, 0, inputWidth, inputHeight);
+            const imgData = processCtx.getImageData(0, 0, inputWidth, inputHeight).data;
 
-            // Chuyển Tensor của tf.js thành mảng Float32 cho ort-web
-            const inputData = await img.data();
-            const inputTensor = new ort.Tensor('float32', inputData, [1, 3, inputWidth, inputHeight]);
-            img.dispose(); // Giải phóng bộ nhớ tf.js
+            const float32Data = new Float32Array(3 * inputWidth * inputHeight);
+            for (let i = 0; i < inputWidth * inputHeight; i++) {
+                float32Data[i] = imgData[i * 4] / 255.0; // Kênh R
+                float32Data[inputWidth * inputHeight + i] = imgData[i * 4 + 1] / 255.0; // Kênh G
+                float32Data[2 * inputWidth * inputHeight + i] = imgData[i * 4 + 2] / 255.0; // Kênh B
+            }
+
+            const inputTensor = new ort.Tensor('float32', float32Data, [1, 3, inputWidth, inputHeight]);
 
             // 2.2 Chạy mô hình
-            const results = await session.run({ images: inputTensor });
-            const output = results.output0.data; // Mảng dữ liệu thô dạng [1, 84, 8400]
+            const results = await session.run({ [session.inputNames[0]]: inputTensor });
+            const output = results[session.outputNames[0]].data; // Dữ liệu thô [1, 84, 8400]
 
-            // 2.3 Xử lý hậu kỳ (NMS - Non Maximum Suppression)
-            // Chúng ta cần lấy tọa độ và độ tin cậy của vật thể
+            // 2.3 Xử lý hậu kỳ (Trích xuất toạ độ)
             const boxes = [];
             const numClasses = 80;
-            const numAnchors = 8400; // Số lượng khung hình dự đoán của YOLOv8 640
+            const numAnchors = 8400;
 
             for (let i = 0; i < numAnchors; i++) {
                 let maxClassScore = 0;
                 let classId = -1;
 
-                // Tìm lớp vật thể có độ tin cậy cao nhất cho khung hình này
+                // Tìm lớp vật thể có độ tin cậy cao nhất cho điểm neo (anchor) này
                 for (let c = 0; c < numClasses; c++) {
-                    // Công thức tính index trong mảng 1D: (row * numCols) + col
                     const score = output[((4 + c) * numAnchors) + i];
                     if (score > maxClassScore) {
                         maxClassScore = score;
@@ -173,15 +228,12 @@
                     }
                 }
 
-                // Chỉ lấy vật thể có độ tin cậy > 0.5 (50%)
-                if (maxClassScore > 0.5) {
-                    // Lấy tọa độ (x, y, w, h) - Lưu ý YOLOv8 trả về dạng [cx, cy, w, h]
+                if (maxClassScore > 0.4) { // Lấy vật thể > 40% tự tin
                     let cx = output[(0 * numAnchors) + i];
                     let cy = output[(1 * numAnchors) + i];
                     let w = output[(2 * numAnchors) + i];
                     let h = output[(3 * numAnchors) + i];
 
-                    // Chuyển sang dạng [x_min, y_min, w, h] để vẽ
                     let x = cx - w / 2;
                     let y = cy - h / 2;
 
@@ -189,32 +241,29 @@
                 }
             }
 
-            // 2.4 Chạy thuật toán NMS để loại bỏ các khung hình trùng lặp
-            // (Để đơn giản và chạy mượt trên iPhone 8 Plus, tôi dùng thuật toán tự viết nhanh)
+            // 2.4 NMS - Thuật toán loại bỏ các râu ria thừa trùng lập (Non Maximum Suppression)
             const finalBoxes = [];
-            boxes.sort((a, b) => b.score - a.score); // Sắp xếp theo độ tin cậy giảm dần
+            boxes.sort((a, b) => b.score - a.score);
 
             while (boxes.length > 0) {
                 const bestBox = boxes.shift();
                 finalBoxes.push(bestBox);
 
-                // Loại bỏ các box khác có độ giao nhau (IoU) lớn hơn 0.5 với box tốt nhất
                 for (let j = 0; j < boxes.length; j++) {
-                    if (calculateIoU(bestBox, boxes[j]) > 0.5) {
+                    if (bestBox.classId === boxes[j].classId && calculateIoU(bestBox, boxes[j]) > 0.45) {
                         boxes.splice(j, 1);
                         j--;
                     }
                 }
             }
 
-            // 2.5 Vẽ kết quả lên Canvas và cập nhật bảng thống kê
+            // 2.5 Vẽ kết quả lên Canvas tỷ lệ và cập nhật bảng thống kê
             drawAndStats(finalBoxes);
 
-            // Chạy vòng lặp tiếp theo (Giới hạn 5 FPS để iPhone không quá nhiệt)
+            // Chạy vòng lặp tiếp theo (Giới hạn tốc độ nhẹ tải nhiệt độ cho iPhone)
             setTimeout(() => requestAnimationFrame(predict), 200);
         }
 
-        // Hàm tính toán độ giao nhau IoU (Intersection over Union)
         function calculateIoU(box1, box2) {
             const x1 = Math.max(box1.x, box2.x);
             const y1 = Math.max(box1.y, box2.y);
@@ -226,26 +275,39 @@
             return intersection / union;
         }
 
-        // Hàm vẽ và thống kê
         function drawAndStats(boxes) {
             const ctx = canvas.getContext('2d');
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Thống kê vật thể
             const stats = {};
 
+            // Tính tỷ lệ màn hình do video có kích thước hiện thị khác 640 vuông gốc
+            const xRatio = canvas.width / 640;
+            const yRatio = canvas.height / 640;
+
             boxes.forEach(box => {
-                // Vẽ khung
+                // Resize về khung thực thay vì 640
+                const finalX = box.x * xRatio;
+                const finalY = box.y * yRatio;
+                const finalW = box.w * xRatio;
+                const finalH = box.h * yRatio;
+
                 ctx.strokeStyle = "#00FF00";
-                ctx.lineWidth = 2;
-                ctx.strokeRect(box.x, box.y, box.w, box.h);
+                ctx.lineWidth = 3;
+                ctx.strokeRect(finalX, finalY, finalW, finalH);
 
-                // Vẽ label
                 ctx.fillStyle = "#00FF00";
-                ctx.font = "16px sans-serif";
-                ctx.fillText(`${box.label} (${(box.score * 100).toFixed(0)}%)`, box.x, box.y > 20 ? box.y - 5 : 20);
+                ctx.font = "bold 16px sans-serif";
 
-                // Cập nhật thống kê
+                // Vẽ background đen lót sau chữ để dễ nhìn
+                const text = `${box.label} (${(box.score * 100).toFixed(0)}%)`;
+                const textWidth = ctx.measureText(text).width;
+                ctx.fillStyle = "rgba(0,0,0,0.6)";
+                ctx.fillRect(finalX, finalY > 20 ? finalY - 20 : 0, textWidth + 6, 20);
+
+                ctx.fillStyle = "#00FF00";
+                ctx.fillText(text, finalX + 3, finalY > 20 ? finalY - 5 : 15);
+
                 if (!stats[box.label]) {
                     stats[box.label] = { count: 0, totalScore: 0 };
                 }
@@ -253,22 +315,17 @@
                 stats[box.label].totalScore += box.score;
             });
 
-            // Cập nhật Bảng Thống kê
-            statsBody.innerHTML = ''; // Xóa bảng cũ
+            statsBody.innerHTML = '';
             for (const [label, data] of Object.entries(stats)) {
                 const avgScore = (data.totalScore / data.count * 100).toFixed(0);
-                const row = `<tr>
+                statsBody.innerHTML += `<tr>
                     <td>${label}</td>
-                    <td>${data.count}</td>
+                    <td><strong>${data.count}</strong></td>
                     <td>${avgScore}%</td>
                 </tr>`;
-                statsBody.innerHTML += row;
             }
         }
-
-        // Nạp thư viện tf.js (chỉ dùng để tiền xử lý ảnh cho ort-web)
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
 </body>
 
 </html>
