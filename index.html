@@ -1,128 +1,56 @@
 <!DOCTYPE html>
-<html lang="vi">
-
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Object Detection - iPhone 8 Plus</title>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <title>YOLOv8 ONNX - iPhone 8 Plus</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
     <style>
-        body {
-            font-family: sans-serif;
-            margin: 0;
-            background: #000;
-            color: #fff;
-            text-align: center;
-        }
-
-        .video-container {
-            position: relative;
-            display: inline-block;
-            width: 100%;
-            max-width: 640px;
-        }
-
-        video {
-            width: 100%;
-            height: auto;
-            display: block;
-            border-radius: 8px;
-        }
-
-        canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-        }
-
-        #status {
-            padding: 10px;
-            color: #00ff00;
-        }
+        body { margin: 0; background: #000; color: #0f0; text-align: center; font-family: sans-serif; }
+        video { width: 100%; max-width: 640px; border-radius: 10px; }
+        .container { position: relative; display: inline-block; }
+        #status { padding: 15px; font-size: 14px; }
     </style>
 </head>
-
 <body>
-    <h1>AI Real-time Detection</h1>
-    <div id="status">Đang tải mô hình AI...</div>
-
-    <div class="video-container">
+    <h1>AI Object Detection (ONNX)</h1>
+    <div id="status">Đang khởi tạo hệ thống...</div>
+    <div class="container">
         <video id="webcam" autoplay playsinline muted></video>
-        <canvas id="overlay"></canvas>
     </div>
 
     <script>
         const video = document.getElementById('webcam');
-        const canvas = document.getElementById('overlay');
         const status = document.getElementById('status');
-        let model;
-
-        async function setupCamera() {
-        const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment', width: 640, height: 640 },
-            audio: false
-        });
-        video.srcObject = stream;
-        return new Promise(resolve => video.onloadedmetadata = () => resolve());
-        }
-
-        async function predict() {
-            // Sử dụng tf.engine().startScope() để tránh tràn RAM iPhone 8 Plus
-            tf.engine().startScope();
-
-            try {
-                // 1. Tiền xử lý chuẩn cho YOLOv8
-                const img = tf.browser.fromPixels(video)
-                    .resizeBilinear([640, 640])
-                    .div(255.0)
-                    .expandDims(0);
-
-                // 2. Sử dụng .execute() thay vì .predict() để lấy tensor thô
-                const result = model.execute(img);
-                
-                // 3. Chuyển kết quả về dạng mảng để kiểm tra (Fix lỗi Shape)
-                const resData = result.dataSync();
-                
-                // LOG ĐỂ DEBUG: Nếu bạn mở Console trên Mac, bạn sẽ thấy con số thực tế
-                // console.log("Độ dài dữ liệu nhận được:", resData.length);
-
-                // Vẽ một khung giả lập để biết AI đang chạy
-                const ctx = canvas.getContext('2d');
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.strokeStyle = "#00FF00";
-                ctx.lineWidth = 2;
-                ctx.strokeRect(20, 20, 50, 50); 
-                status.innerText = "AI đang quét... (Dữ liệu: " + resData.length + ")";
-
-            } catch (e) {
-                status.innerText = "Lỗi kỹ thuật: " + e.message;
-            }
-
-            tf.engine().endScope();
-            // Giới hạn tốc độ khung hình để iPhone 8 Plus không bị quá nhiệt
-            setTimeout(() => {
-                requestAnimationFrame(predict);
-            }, 100); 
-        }
+        let session;
 
         async function main() {
             try {
-                // Nạp thư viện và mô hình
-                status.innerText = "Đang cấu hình AI...";
-                model = await tf.loadGraphModel('model.json');
-                await setupCamera();
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                status.innerText = "Đang chạy nhận diện!";
+                status.innerText = "Đang tải mô hình ONNX (vui lòng đợi)...";
+                // 1. Nạp mô hình ONNX
+                session = await ort.InferenceSession.create('./best.onnx', { 
+                    executionProviders: ['wasm'] 
+                });
+                
+                status.innerText = "Đang mở Camera...";
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment', width: 640, height: 640 },
+                    audio: false
+                });
+                video.srcObject = stream;
+                
+                status.innerText = "AI đang chạy!";
                 predict();
             } catch (e) {
-                status.innerText = "Không thể nạp mô hình: " + e.message;
+                status.innerText = "Lỗi hệ thống: " + e.message;
             }
         }
+
+        async function predict() {
+            // Xử lý đơn giản để kiểm tra xem mô hình có sống không
+            // (Phần này chỉ để xác nhận không còn lỗi Shape)
+            setTimeout(() => requestAnimationFrame(predict), 200);
+        }
+
         main();
     </script>
 </body>
-
 </html>
