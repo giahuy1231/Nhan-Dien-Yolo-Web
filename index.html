@@ -74,22 +74,30 @@
             // Giải phóng bộ nhớ mỗi vòng lặp
             tf.engine().startScope();
 
-            // Tiền xử lý: Chuyển ảnh camera thành Tensor [1, 640, 640, 3]
-            const img = tf.browser.fromPixels(video)
-                .resizeNearestNeighbor([640, 640])
-                .div(255.0)
-                .expandDims(0);
+            // Thay đổi: Sử dụng tf.tidy để dọn dẹp bộ nhớ tốt hơn cho iPhone 8 Plus
+            const img = tf.tidy(() => {
+                return tf.browser.fromPixels(video)
+                    .resizeBilinear([640, 640]) // Dùng Bilinear thay vì Nearest để ảnh mượt hơn
+                    .expandDims(0)
+                    .div(255.0);
+            });
 
-            // Dự đoán
-            const result = await model.predict(img);
+            try {
+                // Thực hiện dự đoán
+                const result = await model.executeAsync(img); // Dùng executeAsync thay vì predict
+        
+                // Log thử kết quả ra màn hình điện thoại để kiểm tra
+                // status.innerText = "Đang nhận diện: " + result.shape; 
 
-            // Xử lý vẽ kết quả lên Canvas (Simplified)
-            const ctx = canvas.getContext('2d');
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            // Lưu ý: Kết quả YOLOv8 trả về mảng số liệu phức tạp
-            // Ở đồ án, bạn có thể log ra để kiểm tra trước:
-            // console.log(result.dataSync());
+                // Giải phóng kết quả sau khi dùng
+                if (Array.isArray(result)) {
+                    result.forEach(t => t.dispose());
+                } else {
+                    result.dispose();
+                }
+            } catch (error) {
+                status.innerText = "Lỗi dự đoán: " + error.message;
+            }
 
             tf.engine().endScope();
             requestAnimationFrame(predict);
